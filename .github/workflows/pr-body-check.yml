@@ -1,0 +1,57 @@
+name: PR body check (PCI 6.5.1)
+
+# Run org-wide as a required workflow from the "PCI change control" rulesets.
+# Checks the PR description, not the code: the type is ticked, a Linear
+# ticket is named, and the 6.5.2 significant-change question is answered.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+jobs:
+  pr-body:
+    name: PR body check
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check the PR description
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -u
+          case "$AUTHOR" in
+            dependabot\[bot\]|renovate\[bot\]|github-actions\[bot\])
+              echo "Bot PR from $AUTHOR: skipped."; exit 0 ;;
+          esac
+
+          fail=0
+          note() { echo "::error title=PR description::$1"; fail=1; }
+
+          # 1. Type: at least one box ticked in the Type section.
+          type_section=$(printf '%s\n' "$BODY" | awk '/^## Type/{f=1;next} /^## /{f=0} f')
+          if ! printf '%s\n' "$type_section" | grep -qiE '^\s*- \[x\]'; then
+            note "Tick one box under '## Type' (feature/bug, hotfix, promotion or back-merge)."
+          fi
+
+          # 2. Linear ticket in the body, title or branch name.
+          ids='(PRD|PRTL|IO|PCI|PAY|TC)-[0-9]+'
+          if ! printf '%s\n%s\n%s\n' "$BODY" "$TITLE" "$BRANCH" | grep -qE "\b$ids\b"; then
+            note "Name the Linear ticket (for example PRD-123) in the description, title or branch name."
+          fi
+
+          # 3. Significant change (6.5.2): No or Yes ticked.
+          sig_section=$(printf '%s\n' "$BODY" | awk '/^## Significant change/{f=1;next} /^## /{f=0} f')
+          if ! printf '%s\n' "$sig_section" | grep -qiE '^\s*- \[x\]'; then
+            note "Answer '## Significant change (PCI 6.5.2)' by ticking No or Yes."
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            echo "Fill in the PR template, then edit the description; this check re-runs on edit."
+            exit 1
+          fi
+          echo "PR description has a type, a Linear ticket and a 6.5.2 answer."
